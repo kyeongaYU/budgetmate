@@ -2,15 +2,19 @@ package com.budgetmate.receipt.service;
 
 import com.budgetmate.receipt.dto.OcrResultDto;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.buffer.DataBufferUtils;
 import org.springframework.http.*;
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.RestTemplate;
-import org.springframework.web.multipart.MultipartFile;
+import org.springframework.http.codec.multipart.FilePart;
+import org.springframework.web.reactive.function.client.WebClient;
+import reactor.core.publisher.Mono;
 
 import java.time.LocalDate;
 import java.util.*;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class OcrService {
@@ -24,80 +28,96 @@ public class OcrService {
     @Value("${naver.ocr.access-key}")
     private String accessKey;
 
-    public OcrResultDto analyzeReceipt(MultipartFile image) throws Exception {
-        try {
-            //  이미지 Base64 인코딩
-            String base64Image = Base64.getEncoder().encodeToString(image.getBytes());
+    public Mono<OcrResultDto> analyzeReceipt(FilePart imagePart) {
+        return DataBufferUtils.join(imagePart.content())
+                .flatMap(dataBuffer -> {
+                    try {
+                        byte[] bytes = new byte[dataBuffer.readableByteCount()];
+                        dataBuffer.read(bytes);
+                        DataBufferUtils.release(dataBuffer); // 메모리 해제
 
-            //  JSON 요청 바디 구성
-            Map<String, Object> imageMap = Map.of(
-                    "format", "jpg",
-                    "name", "receipt",
-                    "data", base64Image
-            );
-            Map<String, Object> requestBody = Map.of(
-                    "images", List.of(imageMap),
-                    "requestId", UUID.randomUUID().toString(),
-                    "version", "V2",
-                    "timestamp", System.currentTimeMillis()
-            );
+                        String base64Image = Base64.getEncoder().encodeToString(bytes);
 
-            //  헤더 설정
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_JSON);
-            headers.set("X-OCR-SECRET", secretKey);
-            headers.set("Authorization", accessKey);
+                        Map<String, Object> imageMap = Map.of(
+                                "format", "jpg",
+                                "name", "receipt",
+                                "data", base64Image
+                        );
 
-            //  API 요청
-            HttpEntity<Map<String, Object>> request = new HttpEntity<>(requestBody, headers);
-            ResponseEntity<Map> response = new RestTemplate().postForEntity(invokeUrl, request, Map.class);
+                        Map<String, Object> requestBody = Map.of(
+                                "images", List.of(imageMap),
+                                "requestId", UUID.randomUUID().toString(),
+                                "version", "V2",
+                                "timestamp", System.currentTimeMillis()
+                        );
 
-            // 응답 파싱
-            Map<String, Object> body = response.getBody();
-            Map<String, Object> imageResult = (Map<String, Object>) ((List<?>) body.get("images")).get(0);
-            Map<String, Object> receipt = (Map<String, Object>) imageResult.get("receipt");
-            Map<String, Object> result = (Map<String, Object>) receipt.get("result");
+                        WebClient webClient = WebClient.builder()
+                                .baseUrl(invokeUrl)
+                                .defaultHeader("X-OCR-SECRET", secretKey)
+                                .defaultHeader("Authorization", accessKey)
+                                .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+                                .build();
 
-            //  상호명 추출
-            String shopName = "상호명 없음";
-            try {
-                Map<String, Object> storeInfo = (Map<String, Object>) result.get("storeInfo");
-                Map<String, Object> name = (Map<String, Object>) storeInfo.get("name");
-                Map<String, Object> formatted = (Map<String, Object>) name.get("formatted");
-                shopName = (String) formatted.get("value");
-            } catch (Exception ignored) {}
+                        return webClient.post()
+                                .bodyValue(requestBody)
+                                .retrieve()
+                                .bodyToMono(Map.class)
+                                .map(response -> {
+                                    try {
+                                        Map<String, Object> imageResult = (Map<String, Object>) ((List<?>) response.get("images")).get(0);
+                                        Map<String, Object> receipt = (Map<String, Object>) imageResult.get("receipt");
+                                        Map<String, Object> result = (Map<String, Object>) receipt.get("result");
 
-            //  결제일 추출
-            LocalDate date = LocalDate.now();
-            try {
-                Map<String, Object> paymentInfo = (Map<String, Object>) result.get("paymentInfo");
-                Map<String, Object> dateMap = (Map<String, Object>) paymentInfo.get("date");
-                Map<String, Object> formatted = (Map<String, Object>) dateMap.get("formatted");
+                                        String shopName = Optional.ofNullable(result)
+                                                .map(r -> (Map<String, Object>) r.get("storeInfo"))
+                                                .map(s -> (Map<String, Object>) s.get("name"))
+                                                .map(n -> (Map<String, Object>) n.get("formatted"))
+                                                .map(f -> (String) f.get("value"))
+                                                .orElse("상호명 없음");
 
-                int year = Integer.parseInt((String) formatted.get("year"));
-                int month = Integer.parseInt((String) formatted.get("month"));
-                int day = Integer.parseInt((String) formatted.get("day"));
+                                        LocalDate date = Optional.ofNullable(result)
+                                                .map(r -> (Map<String, Object>) r.get("paymentInfo"))
+                                                .map(p -> (Map<String, Object>) p.get("date"))
+                                                .map(d -> (Map<String, Object>) d.get("formatted"))
+                                                .map(f -> {
+                                                    try {
+                                                        return LocalDate.of(
+                                                                Integer.parseInt((String) f.get("year")),
+                                                                Integer.parseInt((String) f.get("month")),
+                                                                Integer.parseInt((String) f.get("day"))
+                                                        );
+                                                    } catch (Exception e) {
+                                                        return LocalDate.now();
+                                                    }
+                                                }).orElse(LocalDate.now());
 
-                date = LocalDate.of(year, month, day);
-            } catch (Exception ignored) {}
+                                        int totalPrice = Optional.ofNullable(result)
+                                                .map(r -> (Map<String, Object>) r.get("totalPrice"))
+                                                .map(p -> (Map<String, Object>) p.get("price"))
+                                                .map(f -> (Map<String, Object>) f.get("formatted"))
+                                                .map(m -> {
+                                                    try {
+                                                        return Integer.parseInt(((String) m.get("value")).replaceAll("[^0-9]", ""));
+                                                    } catch (Exception e) {
+                                                        return 0;
+                                                    }
+                                                }).orElse(0);
 
-            // 총금액 추출
-            int totalPrice = 0;
-            try {
-                Map<String, Object> totalPriceMap = (Map<String, Object>) result.get("totalPrice");
-                Map<String, Object> priceMap = (Map<String, Object>) totalPriceMap.get("price");
-                Map<String, Object> formatted = (Map<String, Object>) priceMap.get("formatted");
-
-                String priceStr = (String) formatted.get("value");
-                totalPrice = Integer.parseInt(priceStr.replaceAll("[^0-9]", ""));
-            } catch (Exception ignored) {}
-
-            // 9. DTO로 반환
-            return new OcrResultDto(shopName, date, totalPrice);
-
-        } catch (Exception e) {
-            e.printStackTrace();
-            return new OcrResultDto("인식 실패", LocalDate.now(), 0);
-        }
+                                        return new OcrResultDto(shopName, date, totalPrice);
+                                    } catch (Exception e) {
+                                        log.error("OCR 파싱 실패", e);
+                                        return new OcrResultDto("인식 실패", LocalDate.now(), 0);
+                                    }
+                                });
+                    } catch (Exception e) {
+                        DataBufferUtils.release(dataBuffer); // 예외 발생 시에도 메모리 해제
+                        log.error("DataBuffer read 실패", e);
+                        return Mono.just(new OcrResultDto("인식 실패", LocalDate.now(), 0));
+                    }
+                })
+                .onErrorResume(e -> {
+                    log.error("OCR 처리 중 예외 발생", e);
+                    return Mono.just(new OcrResultDto("인식 실패", LocalDate.now(), 0));
+                });
     }
 }
