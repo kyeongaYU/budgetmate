@@ -8,15 +8,13 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Getter;
-import lombok.Setter;
+import lombok.*;
 
 @Entity
 @Table(name="receipt")
 @Getter
 @Setter
+@NoArgsConstructor
 @AllArgsConstructor
 @Builder
 public class ReceiptEntity {
@@ -24,37 +22,27 @@ public class ReceiptEntity {
 	@Id
 	@GeneratedValue(strategy = GenerationType.IDENTITY)
 	private Long receiptId;
-	
+
 	@Column(name = "shop", length = 50)
 	private String shop;
-	
-	@Column(name = "userId", nullable = false)
+
+	@Column(name = "image_path", nullable = true, length = 255)
+	private String imagePath;
+
+	@Column(name = "user_id", nullable = false)
 	private Long userId;
-	
-	@Column(name = "keyword_id")
+
+	@Column(name = "keyword_id", nullable = false)
 	private Long keywordId;
-	
-	@Builder.Default
+
+	@Column(name = "total_price", nullable = false)
+	private Long totalPrice;
+
 	@Column(name = "date", nullable = false)
-	private LocalDate date = LocalDate.now();
-	
 	@Builder.Default
+	private LocalDate date = LocalDate.now();
+
 	@Column(name = "is_deleted", nullable = false)
+	@Builder.Default
 	private Boolean isDeleted = false;
-	
-	public ReceiptEntity() {}
-	
-	/*
-	@Builder  //내부적으로 모든 필드를 받는 생성자를 자동 호출하기 때문
-	public ReceiptEntity(String shop, Long userId, Long keywordId, LocalDate date, Boolean isDeleted) {
-		
-		this.shop = shop;
-		this.userId = userId;
-		this.keywordId = keywordId;
-		this.date = date;
-		this.isDeleted = isDeleted;
-		
-	}
-	*/
-	
 }

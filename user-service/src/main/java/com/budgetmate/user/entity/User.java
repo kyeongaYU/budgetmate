@@ -36,17 +36,19 @@ public class User implements UserDetails {
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     @Builder.Default
-    private LoginType loginType = LoginType.LOCAL;  // 기본값 local
+    private LoginType loginType = LoginType.LOCAL;
 
-    @Column
-    private String socialId;  // 소셜 로그인 ID (nullable)
+    private String socialId;
+
+    private String resetCode;
+
+    @Temporal(TemporalType.TIMESTAMP)
+    private Date resetCodeExpireAt;
 
     @Builder.Default
     private int lastWeek = 0;
-
     @Builder.Default
     private int currentWeek = 0;
-
     @Builder.Default
     private int point = 0;
 
@@ -57,12 +59,11 @@ public class User implements UserDetails {
     @Temporal(TemporalType.TIMESTAMP)
     private Date updatedAt;
 
-    // Spring Security 필수 메서드 구현
+    // Spring Security UserDetails 구현
     @Override
     public Collection<? extends GrantedAuthority> getAuthorities() {
         return roles.stream().map(SimpleGrantedAuthority::new).toList();
     }
-
     @Override public String getUsername() { return email; }
     @Override public boolean isAccountNonExpired() { return true; }
     @Override public boolean isAccountNonLocked() { return true; }
@@ -74,7 +75,6 @@ public class User implements UserDetails {
         this.createdAt = new Date();
         this.updatedAt = new Date();
     }
-
     @PreUpdate
     protected void onUpdate() {
         this.updatedAt = new Date();
@@ -83,5 +83,4 @@ public class User implements UserDetails {
     public String getUserName() {
         return this.userName;
     }
-
 }

@@ -5,6 +5,11 @@ spring:
   application:
     name: api-gateway
 
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 50MB
+
   cloud:
     gateway:
       multipart:
@@ -25,35 +30,59 @@ spring:
           filters:
             - PreserveHostHeader
 
+        - id: image-upload-api
+          uri: lb://receipt-service
+          predicates:
+            - Path=/api/images/upload
+          filters:
+            - PreserveHostHeader
+
+        - id: image-static
+          uri: lb://receipt-service
+          predicates:
+            - Path=/image/upload/images/**
+          filters:
+            - PreserveHostHeader
+
+        - id: receipt-image-upload
+          uri: lb://receipt-service
+          predicates:
+            - Path=/receipt/image/upload
+          filters:
+            - PreserveHostHeader
+
+        - id: receipt-image-static
+          uri: lb://receipt-service
+          predicates:
+            - Path=/receipt/image/**
+          filters:
+            - PreserveHostHeader
+
       default-filters:
-        - RemoveRequestHeader=Cookie
+      # JWT 를 쿠키로 주고받으므로 Cookie 헤더 제거 필터 비활성화
+      # - RemoveRequestHeader=Cookie
 
       globalcors:
         add-to-simple-url-handler-mapping: true
         corsConfigurations:
           '[/**]':
-            allowedOrigins:
+            allowedOriginPatterns:
               - http://localhost:5173
-            allowedMethods:
-              - GET
-              - POST
-              - PUT
-              - DELETE
-              - OPTIONS
-            allowedHeaders:
-              - "*"
+              - http://172.20.10.*:5173  # 휴대폰
+            allowedMethods: "*"
+            allowedHeaders: "*"
             allowCredentials: true
 
       httpclient:
-        max-initial-line-length: 50000
+        max-initial-line-length: 50000   # (기존 그대로)
 
-  codec:
-    max-in-memory-size: 10MB
+codec:
+  max-in-memory-size: 10MB              # 응답 버퍼 제한
 
-  discovery:
-    locator:
-      enabled: true
-      lower-case-service-id: true
+discovery:
+  locator:
+    enabled: true
+    lower-case-service-id: true
 
 eureka:
   client:
@@ -61,7 +90,6 @@ eureka:
     fetch-registry: true
     service-url:
       defaultZone: http://localhost:8761/eureka
-
   instance:
     prefer-ip-address: true
 

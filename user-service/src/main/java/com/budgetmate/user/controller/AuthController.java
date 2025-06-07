@@ -1,9 +1,6 @@
 package com.budgetmate.user.controller;
 
-import com.budgetmate.user.dto.LoginRequest;
-import com.budgetmate.user.dto.SignupRequest;
-import com.budgetmate.user.dto.SocialLoginResult;
-import com.budgetmate.user.dto.SocialUserInfo;
+import com.budgetmate.user.dto.*;
 import com.budgetmate.user.entity.LoginType;
 import com.budgetmate.user.entity.User;
 import com.budgetmate.user.security.CustomUserDetails;
@@ -17,7 +14,6 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 @Slf4j
 @RestController
@@ -29,92 +25,198 @@ public class AuthController {
     private final EmailService emailService;
     private final JwtTokenProvider jwtTokenProvider;
 
-    private final Map<String, VerificationInfo> verificationCodes = new ConcurrentHashMap<>();
-    private static final long CODE_EXPIRE_TIME = 5 * 60 * 1000;
-
     @PostMapping("/send-code")
-    public ResponseEntity<?> sendCode(@RequestBody Map<String, String> request) {
-        String email = request.get("email");
-        log.info("[AuthController] /send-code 요청 들어옴 → {}", email);
+    public ResponseEntity<SendCodeResponse> sendCodeForSignup(@RequestBody SendCodeRequest request) {
+        String email = request.getEmail().trim().toLowerCase();
+        SendCodeResponse resp = new SendCodeResponse();
 
-        if (userService.existsByEmail(email)) {
-            return ResponseEntity.badRequest().body(Map.of(
-                    "success", false,
-                    "message", "이미 가입된 이메일입니다."
-            ));
+        try {
+            String code = userService.generateAndSaveSignupCode(email);
+            emailService.sendSignupCodeEmail(email, code);
+
+            resp.setSuccess(true);
+            resp.setMessage("가입용 인증 코드를 이메일로 발송했습니다.");
+            return ResponseEntity.ok(resp);
+
+        } catch (RuntimeException e) {
+            resp.setSuccess(false);
+            resp.setMessage(e.getMessage());
+            return ResponseEntity.badRequest().body(resp);
+
+        } catch (Exception e) {
+            log.error("[AuthController] 인증코드 이메일 전송 실패 → {}", email, e);
+            resp.setSuccess(false);
+            resp.setMessage("인증 코드 발송 중 오류가 발생했습니다.");
+            return ResponseEntity.status(500).body(resp);
         }
-
-        String code = emailService.sendVerificationCode(email);
-        verificationCodes.put(email, new VerificationInfo(code));
-        return ResponseEntity.ok(Map.of("success", true, "message", "이메일 전송 완료"));
     }
 
     @PostMapping("/verify-code")
-    public ResponseEntity<?> verifyCode(@RequestBody Map<String, String> request) {
-        String email = request.get("email");
-        String inputCode = request.get("code");
+    public ResponseEntity<VerifyCodeResponse> verifyCodeForSignup(@RequestBody VerifyCodeRequest request) {
+        String email = request.getEmail().trim().toLowerCase();
+        String code  = request.getCode().trim();
+        VerifyCodeResponse resp = new VerifyCodeResponse();
 
-        VerificationInfo info = verificationCodes.get(email);
-        if (info == null) {
-            return ResponseEntity.badRequest().body(Map.of("verified", false, "message", "인증 요청 내역이 없습니다."));
+        try {
+            boolean ok = userService.verifySignupCode(email, code);
+            if (ok) {
+                resp.setVerified(true);
+                resp.setMessage("가입용 인증 코드가 일치합니다.");
+                return ResponseEntity.ok(resp);
+            } else {
+                resp.setVerified(false);
+                resp.setMessage("인증 코드가 일치하지 않거나 만료되었습니다.");
+                return ResponseEntity.badRequest().body(resp);
+            }
+        } catch (RuntimeException e) {
+            resp.setVerified(false);
+            resp.setMessage(e.getMessage());
+            return ResponseEntity.badRequest().body(resp);
         }
-
-        if (info.isExpired(CODE_EXPIRE_TIME)) {
-            verificationCodes.remove(email);
-            return ResponseEntity.badRequest().body(Map.of("verified", false, "message", "인증코드가 만료되었습니다."));
-        }
-
-        if (!info.getCode().equals(inputCode)) {
-            return ResponseEntity.badRequest().body(Map.of("verified", false, "message", "인증코드가 일치하지 않습니다."));
-        }
-
-        verificationCodes.remove(email);
-        return ResponseEntity.ok(Map.of("verified", true));
     }
 
     @PostMapping("/signup")
-    public ResponseEntity<?> signup(@RequestBody SignupRequest request) {
-        if (userService.existsByEmail(request.getEmail())) {
-            return ResponseEntity.badRequest().body(Map.of(
-                    "success", false,
-                    "message", "이미 등록된 이메일입니다."
-            ));
+    public ResponseEntity<SignupResponse> signup(@RequestBody SignupRequest request) {
+        SignupResponse resp = new SignupResponse();
+        String email = request.getEmail().trim().toLowerCase();
+
+        try {
+            // 1) 회원가입 수행
+            User newUser = userService.signup(request);
+
+            // 2) 토큰 생성 시 ● 이메일과 Roles 목록( List<String> )을 넘겨준다
+            String token = jwtTokenProvider.createToken(
+                    newUser.getEmail(),
+                    newUser.getRoles()
+            );
+
+            // 3) 응답으로 토큰과 생성된 User 객체를 담아 리턴
+            resp.setSuccess(true);
+            resp.setUser(newUser);
+            resp.setToken(token);
+            return ResponseEntity.ok(resp);
+
+        } catch (RuntimeException e) {
+            resp.setSuccess(false);
+            resp.setMessage(e.getMessage());
+            return ResponseEntity.badRequest().body(resp);
         }
-
-        User newUser = userService.signup(request);
-        String token = jwtTokenProvider.createToken(newUser.getEmail(), newUser.getRoles());
-
-        return ResponseEntity.ok(Map.of(
-                "success", true,
-                "user", newUser,
-                "token", token
-        ));
     }
 
     @PostMapping("/login")
-    public ResponseEntity<?> login(@RequestBody LoginRequest request) {
-        String token = userService.login(request);
-        return ResponseEntity.ok(Map.of("token", token));
+    public ResponseEntity<LoginResponse> login(@RequestBody LoginRequest request) {
+
+        User user = userService.authenticate(request.getEmail(), request.getPassword());
+        if (user == null) {
+            return ResponseEntity.status(401).build();
+        }
+
+        String token = jwtTokenProvider.createToken(
+                user.getEmail(),
+                user.getRoles()
+        );
+
+        return ResponseEntity.ok(new LoginResponse(user.getId(), token));
+    }
+
+    @PostMapping("/send-reset-code")
+    public ResponseEntity<SendResetCodeResponse> sendResetCode(@RequestBody SendResetCodeRequest request) {
+        String email = request.getEmail().trim().toLowerCase();
+        SendResetCodeResponse resp = new SendResetCodeResponse();
+
+        if (!userService.existsByEmail(email)) {
+            resp.setSuccess(false);
+            resp.setMessage("등록된 이메일이 아닙니다.");
+            return ResponseEntity.badRequest().body(resp);
+        }
+
+        String code = userService.generateAndSaveResetCode(email);
+        try {
+            emailService.sendResetCodeEmail(email, code);
+            resp.setSuccess(true);
+            resp.setMessage("비밀번호 재설정용 인증 코드를 이메일로 발송했습니다.");
+            return ResponseEntity.ok(resp);
+        } catch (Exception e) {
+            log.error("[AuthController] 재설정용 인증 코드 이메일 전송 실패 → {}", email, e);
+            resp.setSuccess(false);
+            resp.setMessage("인증 코드 발송 중 오류가 발생했습니다.");
+            return ResponseEntity.status(500).body(resp);
+        }
+    }
+
+    @PostMapping("/verify-reset-code")
+    public ResponseEntity<VerifyResetCodeResponse> verifyResetCode(@RequestBody VerifyResetCodeRequest request) {
+        String email = request.getEmail().trim().toLowerCase();
+        String code  = request.getCode().trim();
+        VerifyResetCodeResponse resp = new VerifyResetCodeResponse();
+
+        try {
+            boolean ok = userService.verifyResetCode(email, code);
+            if (ok) {
+                resp.setVerified(true);
+                resp.setMessage("재설정용 인증 코드가 일치합니다.");
+                return ResponseEntity.ok(resp);
+            } else {
+                resp.setVerified(false);
+                resp.setMessage("인증 코드가 일치하지 않거나 만료되었습니다.");
+                return ResponseEntity.badRequest().body(resp);
+            }
+        } catch (RuntimeException e) {
+            resp.setVerified(false);
+            resp.setMessage(e.getMessage());
+            return ResponseEntity.badRequest().body(resp);
+        }
+    }
+
+    @PostMapping("/reset-password-by-code")
+    public ResponseEntity<ResetPasswordByCodeResponse> resetPasswordByCode(
+            @RequestBody ResetPasswordByCodeRequest request) {
+        String email       = request.getEmail().trim().toLowerCase();
+        String code        = request.getCode().trim();
+        String newPassword = request.getNewPassword();
+        ResetPasswordByCodeResponse resp = new ResetPasswordByCodeResponse();
+
+        try {
+            boolean success = userService.resetPasswordWithCode(email, code, newPassword);
+            if (success) {
+                resp.setSuccess(true);
+                resp.setMessage("비밀번호가 성공적으로 변경되었습니다.");
+                return ResponseEntity.ok(resp);
+            } else {
+                resp.setSuccess(false);
+                resp.setMessage("비밀번호 재설정에 실패했습니다.");
+                return ResponseEntity.badRequest().body(resp);
+            }
+        } catch (RuntimeException e) {
+            resp.setSuccess(false);
+            resp.setMessage(e.getMessage());
+            return ResponseEntity.badRequest().body(resp);
+        }
     }
 
     @GetMapping("/oauth/kakao")
     public ResponseEntity<?> kakaoLogin(@RequestParam String code) {
+        log.info("[AuthController.kakaoLogin] 진입 → code = {}", code);
         try {
-            SocialLoginResult result = userService.kakaoLoginAndGetUser(code);
-
+            var result = userService.kakaoLoginAndGetUser(code);
             if (result.isRequiresConsent()) {
                 return ResponseEntity.ok(Map.of(
                         "requiresConsent", true,
-                        "email", result.getUser().getEmail(),
-                        "userName", result.getUser().getUserName()
+                        "email",          result.getUser().getEmail(),
+                        "userName",       result.getUser().getUserName()
                 ));
             }
-
-            String token = jwtTokenProvider.createToken(result.getUser().getEmail(), result.getUser().getRoles());
+            User user = result.getUser();
+            // "카카오 로그인" 이후에도 createToken 호출 시 email과 roles 리스트를 넘겨준다
+            String token = jwtTokenProvider.createToken(
+                    result.getUser().getEmail(),
+                    result.getUser().getRoles()
+            );
             return ResponseEntity.ok(Map.of(
+                    "userId", user.getId(),
                     "accessToken", token,
-                    "email", result.getUser().getEmail(),
-                    "userName", result.getUser().getUserName()
+                    "email",       result.getUser().getEmail(),
+                    "userName",    result.getUser().getUserName()
             ));
         } catch (Exception e) {
             log.error("카카오 로그인 처리 중 오류 발생", e);
@@ -125,21 +227,25 @@ public class AuthController {
     @GetMapping("/oauth/google")
     public ResponseEntity<?> googleLogin(@RequestParam String code) {
         try {
-            SocialLoginResult result = userService.googleLoginAndGetUser(code);
-
+            var result = userService.googleLoginAndGetUser(code);
             if (result.isRequiresConsent()) {
                 return ResponseEntity.ok(Map.of(
                         "requiresConsent", true,
-                        "email", result.getUser().getEmail(),
-                        "userName", result.getUser().getUserName()
+                        "email",          result.getUser().getEmail(),
+                        "userName",       result.getUser().getUserName()
                 ));
             }
-
-            String token = jwtTokenProvider.createToken(result.getUser().getEmail(), result.getUser().getRoles());
+            User user=result.getUser();
+            // "구글 로그인" 이후에도 createToken 호출 시 email과 roles 리스트를 넘겨준다
+            String token = jwtTokenProvider.createToken(
+                    result.getUser().getEmail(),
+                    result.getUser().getRoles()
+            );
             return ResponseEntity.ok(Map.of(
+                    "userId", user.getId(),
                     "accessToken", token,
-                    "email", result.getUser().getEmail(),
-                    "userName", result.getUser().getUserName()
+                    "email",       result.getUser().getEmail(),
+                    "userName",    result.getUser().getUserName()
             ));
         } catch (Exception e) {
             log.error("구글 로그인 실패", e);
@@ -148,65 +254,64 @@ public class AuthController {
     }
 
     @GetMapping("/me")
-    public ResponseEntity<?> getMyInfo(@AuthenticationPrincipal CustomUserDetails userDetails) {
+    public ResponseEntity<MyInfoResponse> getMyInfo(@AuthenticationPrincipal CustomUserDetails userDetails) {
         User user = userDetails.getUser();
-        return ResponseEntity.ok(Map.of(
-                "id", user.getId(),
-                "email", user.getEmail(),
-                "userName", user.getUserName(),
-                "roles", user.getRoles()
-        ));
+        MyInfoResponse resp = new MyInfoResponse();
+        resp.setId(user.getId());
+        resp.setEmail(user.getEmail());
+        resp.setUserName(user.getUserName());
+        resp.setRoles(user.getRoles());
+        return ResponseEntity.ok(resp);
     }
+
     @PostMapping("/confirm-social")
-    public ResponseEntity<?> confirmSocial(@RequestBody Map<String, String> request) {
-        String email = request.get("email");
-        String loginTypeStr = request.get("loginType");
+    public ResponseEntity<ConfirmSocialResponse> confirmSocial(@RequestBody ConfirmSocialRequest request) {
+        String email        = request.getEmail();
+        String loginTypeStr = request.getLoginType();
+        ConfirmSocialResponse resp = new ConfirmSocialResponse();
 
         User user = userService.findByEmail(email);
-
         if (user.getLoginType() != LoginType.LOCAL) {
-            return ResponseEntity.badRequest().body(Map.of("error", "이미 소셜 로그인 계정입니다."));
+            resp.setError("이미 소셜 로그인 계정입니다.");
+            return ResponseEntity.badRequest().body(resp);
         }
 
         LoginType typeToUpdate;
         try {
             typeToUpdate = LoginType.valueOf(loginTypeStr.toUpperCase());
         } catch (IllegalArgumentException e) {
-            return ResponseEntity.badRequest().body(Map.of("error", "유효하지 않은 로그인 타입입니다."));
+            resp.setError("유효하지 않은 로그인 타입입니다.");
+            return ResponseEntity.badRequest().body(resp);
         }
 
         User updated = userService.confirmSocialLink(
                 SocialUserInfo.builder()
-                        .id(user.getSocialId()) // ← 이건 프론트에서 넘겨줄 수도 있음
+                        .id(user.getSocialId())
                         .email(user.getEmail())
                         .name(user.getUserName())
                         .build(),
                 typeToUpdate
         );
 
-        String token = jwtTokenProvider.createToken(updated.getEmail(), updated.getRoles());
-        return ResponseEntity.ok(Map.of(
-                "accessToken", token,
-                "email", updated.getEmail(),
-                "userName", updated.getUserName()
-        ));
+        // Social 연결 후에도 createToken 호출 시 email과 roles 리스트를 넘겨준다
+        String token = jwtTokenProvider.createToken(
+                updated.getEmail(),
+                updated.getRoles()
+        );
+
+        resp.setAccessToken(token);
+        resp.setEmail(updated.getEmail());
+        resp.setUserName(updated.getUserName());
+        return ResponseEntity.ok(resp);
     }
 
-    private static class VerificationInfo {
-        private final String code;
-        private final long createdAt;
-
-        public VerificationInfo(String code) {
-            this.code = code;
-            this.createdAt = System.currentTimeMillis();
-        }
-
-        public boolean isExpired(long timeoutMillis) {
-            return System.currentTimeMillis() - createdAt > timeoutMillis;
-        }
-
-        public String getCode() {
-            return code;
+    @PostMapping("/find-id")
+    public ResponseEntity<FindIdResponse> findId(@RequestBody FindIdRequest request) {
+        try {
+            FindIdResponse response = userService.findIdByUserName(request);
+            return ResponseEntity.ok(response);
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest().build();
         }
     }
 }
