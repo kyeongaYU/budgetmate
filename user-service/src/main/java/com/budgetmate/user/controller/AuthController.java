@@ -106,7 +106,7 @@ public class AuthController {
 
     @PostMapping("/login")
     public ResponseEntity<LoginResponse> login(@RequestBody LoginRequest request) {
-// LoginResponse : userId, token
+
         User user = userService.authenticate(request.getEmail(), request.getPassword());
         if (user == null) {
             return ResponseEntity.status(401).build();
