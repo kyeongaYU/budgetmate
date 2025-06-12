@@ -41,3 +41,6 @@ test-output/
 *.swp
 *.swo
 receipt-service/upload*/
+
+#config-server
+./config-server

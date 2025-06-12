@@ -11,8 +11,6 @@ public class UserDto {
 	private int point;
 	private int lastWeek;
 	private int currentWeek;
-	//private int badge;
-	// BeanPropertyRowMapper : 스네이크 <-> 카멜 케이스 변환을 자동 지원함.
 	
 	public void addPoint() {
 		System.out.println("7 : addPoint");
