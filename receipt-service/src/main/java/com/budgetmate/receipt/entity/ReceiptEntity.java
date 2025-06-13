@@ -10,23 +10,23 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import lombok.*;
 
-@Entity
-@Table(name="receipt")
+@Builder
+@AllArgsConstructor
+@NoArgsConstructor
 @Getter
 @Setter
-@NoArgsConstructor
-@AllArgsConstructor
-@Builder
+@Entity
+@Table(name = "receipt")
 public class ReceiptEntity {
 
 	@Id
 	@GeneratedValue(strategy = GenerationType.IDENTITY)
 	private Long receiptId;
 
-	@Column(name = "shop", length = 50)
+	@Column(length = 50)
 	private String shop;
 
-	@Column(name = "image_path", nullable = true, length = 255)
+	@Column(name = "image_path", length = 255)
 	private String imagePath;
 
 	@Column(name = "user_id", nullable = false)
@@ -38,11 +38,19 @@ public class ReceiptEntity {
 	@Column(name = "total_price", nullable = false)
 	private Long totalPrice;
 
-	@Column(name = "date", nullable = false)
 	@Builder.Default
+	@Column(nullable = false)
 	private LocalDate date = LocalDate.now();
 
-	@Column(name = "is_deleted", nullable = false)
 	@Builder.Default
-	private Boolean isDeleted = false;
+	@Column(name = "is_deleted", nullable = false)
+	private boolean isDeleted = false;
+
+	public boolean isDeleted() {
+		return isDeleted;
+	}
+
+	public void setIsDeleted(boolean isDeleted) {
+		this.isDeleted = isDeleted;
+	}
 }

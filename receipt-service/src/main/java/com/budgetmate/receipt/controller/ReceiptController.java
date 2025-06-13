@@ -1,6 +1,8 @@
 package com.budgetmate.receipt.controller;
 
 
+import com.budgetmate.receipt.entity.ReceiptItemEntity;
+import com.budgetmate.receipt.repository.ReceiptItemRepository;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -15,12 +17,13 @@ import java.util.List;
 public class ReceiptController {
 
 	private final ReceiptService receiptService;
+	private final ReceiptItemRepository receiptItemRepository;
 
-	public ReceiptController(ReceiptService receiptService) {
-
+	public ReceiptController(ReceiptService receiptService, ReceiptItemRepository receiptItemRepository) {
 		this.receiptService = receiptService;
-
+		this.receiptItemRepository = receiptItemRepository;
 	}
+
 
 	@PostMapping("/createReceipt")
 	public ReceiptDto createReceipt(@RequestBody ReceiptDto receiptDto) {
@@ -39,5 +42,21 @@ public class ReceiptController {
 		return ResponseEntity.noContent().build();
 	}
 
+	@GetMapping("/{receiptId}/items")
+	public List<ReceiptItemEntity> getItems(@PathVariable Long receiptId) {
+		return receiptItemRepository.findByReceiptIdAndIsDeletedFalse(receiptId);
+	}
+
+	@PatchMapping("/{id}/delete")
+	public ResponseEntity<Void> softDelete(@PathVariable Long id) {
+		receiptService.markAsDeleted(id);
+		return ResponseEntity.ok().build();
+	}
+
+	@PatchMapping("/{id}/restore")
+	public ResponseEntity<Void> restore(@PathVariable Long id) {
+		receiptService.unmarkAsDeleted(id);
+		return ResponseEntity.ok().build();
+	}
 
 }

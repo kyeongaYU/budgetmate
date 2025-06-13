@@ -1,6 +1,7 @@
 package com.budgetmate.receipt.service;
 
 import com.budgetmate.receipt.dto.OcrResultDto;
+import com.budgetmate.receipt.dto.ReceiptItemDto;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -9,7 +10,6 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
-
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -32,85 +32,159 @@ public class OcrService {
     private String accessKey;
 
     public OcrResultDto analyzeReceiptFromFile(String filePath) throws IOException {
-        // 1) 파일 읽어서 Base64 인코딩
         byte[] bytes = Files.readAllBytes(Paths.get(filePath));
         String base64Image = Base64.getEncoder().encodeToString(bytes);
 
-        // 2) 요청 바디 구성
-        Map<String,Object> imageMap = Map.of(
-                "format","jpg",
-                "name","receipt",
+        Map<String, Object> imageMap = Map.of(
+                "format", "jpg",
+                "name", "receipt",
                 "data", base64Image
         );
-        Map<String,Object> requestBody = Map.of(
+        Map<String, Object> requestBody = Map.of(
                 "images", List.of(imageMap),
                 "requestId", UUID.randomUUID().toString(),
-                "version","V2",
+                "version", "V2",
                 "timestamp", System.currentTimeMillis()
         );
 
-        // 3) 헤더 설정
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         headers.set("X-OCR-SECRET", secretKey);
         headers.set("Authorization", accessKey);
 
-        HttpEntity<Map<String,Object>> request = new HttpEntity<>(requestBody, headers);
+        HttpEntity<Map<String, Object>> request = new HttpEntity<>(requestBody, headers);
 
-        // 4) POST 요청 및 응답(Map) 받기
         @SuppressWarnings("unchecked")
-        Map<String,Object> response =
-                restTemplate.postForObject(invokeUrl, request, Map.class);
+        Map<String, Object> response = restTemplate.postForObject(invokeUrl, request, Map.class);
+        log.info("OCR 응답 전체: {}", response);
 
-        // 5) 응답 파싱 (기존 로직 그대로)
         @SuppressWarnings("unchecked")
-        Map<String,Object> imageResult = (Map<String,Object>) ((List<?>)response.get("images")).get(0);
+        Map<String, Object> imageResult = (Map<String, Object>) ((List<?>) response.get("images")).get(0);
         @SuppressWarnings("unchecked")
-        Map<String,Object> receipt    = (Map<String,Object>) imageResult.get("receipt");
+        Map<String, Object> receipt = (Map<String, Object>) imageResult.get("receipt");
         @SuppressWarnings("unchecked")
-        Map<String,Object> result     = (Map<String,Object>) receipt.get("result");
+        Map<String, Object> result = (Map<String, Object>) receipt.get("result");
 
         String shopName = Optional.ofNullable(result)
-                .map(r -> (Map<String,Object>)r.get("storeInfo"))
-                .map(s -> (Map<String,Object>)s.get("name"))
-                .map(n -> (Map<String,Object>)n.get("formatted"))
-                .map(f -> (String)f.get("value"))
+                .map(r -> (Map<String, Object>) r.get("storeInfo"))
+                .map(s -> (Map<String, Object>) s.get("name"))
+                .map(n -> (Map<String, Object>) n.get("formatted"))
+                .map(f -> (String) f.get("value"))
                 .orElse("상호명 없음");
 
         LocalDate date = Optional.ofNullable(result)
-                .map(r -> (Map<String,Object>)r.get("paymentInfo"))
-                .map(p -> (Map<String,Object>)p.get("date"))
-                .map(d -> (Map<String,Object>)d.get("formatted"))
+                .map(r -> (Map<String, Object>) r.get("paymentInfo"))
+                .map(p -> (Map<String, Object>) p.get("date"))
+                .map(d -> (Map<String, Object>) d.get("formatted"))
                 .map(f -> {
                     try {
                         return LocalDate.of(
-                                Integer.parseInt((String)f.get("year")),
-                                Integer.parseInt((String)f.get("month")),
-                                Integer.parseInt((String)f.get("day"))
+                                Integer.parseInt((String) f.get("year")),
+                                Integer.parseInt((String) f.get("month")),
+                                Integer.parseInt((String) f.get("day"))
                         );
                     } catch (Exception ex) {
                         return LocalDate.now();
                     }
-                })
-                .orElse(LocalDate.now());
+                }).orElse(LocalDate.now());
 
         int totalPrice = Optional.ofNullable(result)
-                .map(r -> (Map<String,Object>)r.get("totalPrice"))
-                .map(p -> (Map<String,Object>)p.get("price"))
-                .map(f -> (Map<String,Object>)f.get("formatted"))
+                .map(r -> (Map<String, Object>) r.get("totalPrice"))
+                .map(p -> (Map<String, Object>) p.get("price"))
+                .map(f -> (Map<String, Object>) f.get("formatted"))
                 .map(m -> {
                     try {
-                        return Integer.parseInt(((String)m.get("value")).replaceAll("\\D",""));
+                        return Integer.parseInt(((String) m.get("value")).replaceAll("\\D", ""));
                     } catch (Exception ex) {
                         return 0;
                     }
-                })
-                .orElse(0);
+                }).orElse(0);
 
-        // 6) DTO 생성 및 반환
-        OcrResultDto dto = new OcrResultDto(shopName, date, totalPrice);
+        List<ReceiptItemDto> itemDtos = new ArrayList<>();
+        try {
+            List<Map<String, Object>> subResults = (List<Map<String, Object>>) result.get("subResults");
+            for (Map<String, Object> subResult : subResults) {
+                List<Map<String, Object>> items = (List<Map<String, Object>>) subResult.get("items");
+                for (Map<String, Object> item : items) {
+                    try {
+                        String name = Optional.ofNullable((Map<String, Object>) item.get("name"))
+                                .map(m -> (String) m.get("text"))
+                                .orElse("상품명 없음");
+
+                        //  unitPrice 추출
+                        Map<String, Object> priceMap = (Map<String, Object>) item.get("price");
+                        Object unitPriceObj = null;
+                        if (priceMap != null && priceMap.get("unitPrice") != null) {
+                            unitPriceObj = priceMap.get("unitPrice");
+                        } else if (item.get("unitPrice") != null) {
+                            unitPriceObj = item.get("unitPrice");
+                        }
+
+                        log.debug(" unitPrice 전체 구조: {}", unitPriceObj);
+
+                        int unitPrice = 0;
+                        try {
+                            if (unitPriceObj instanceof Map unitPriceMap) {
+                                Map<String, Object> formatted = (Map<String, Object>) unitPriceMap.get("formatted");
+                                if (formatted != null && formatted.get("value") != null) {
+                                    String raw = formatted.get("value").toString();
+                                    unitPrice = Integer.parseInt(raw.replaceAll("\\D", ""));
+                                    log.info(" unitPrice(formatted) 파싱됨: {}", raw);
+                                } else if (unitPriceMap.get("value") != null) {
+                                    String raw = unitPriceMap.get("value").toString();
+                                    unitPrice = Integer.parseInt(raw.replaceAll("\\D", ""));
+                                    log.info(" unitPrice(value) 파싱됨: {}", raw);
+                                } else if (unitPriceMap.get("text") != null) {
+                                    String raw = unitPriceMap.get("text").toString();
+                                    unitPrice = Integer.parseInt(raw.replaceAll("\\D", ""));
+                                    log.info(" unitPrice(text) 파싱됨: {}", raw);
+                                } else {
+                                    log.warn(" unitPrice 내부 필드를 찾을 수 없음: {}", unitPriceMap);
+                                }
+                            } else {
+                                log.warn(" unitPrice 필드가 Map이 아님: {}", unitPriceObj);
+                            }
+                        } catch (Exception e) {
+                            log.warn(" unitPrice 파싱 중 오류: {}", e.getMessage());
+                        }
+
+                        int quantity = Optional.ofNullable((Map<String, Object>) item.get("count"))
+                                .map(m -> (String) m.get("text"))
+                                .map(t -> t.replaceAll("\\D", ""))
+                                .map(s -> s.isEmpty() ? "1" : s)
+                                .map(Integer::parseInt)
+                                .orElse(1);
+
+                        int price = Optional.ofNullable((Map<String, Object>) item.get("price"))
+                                .map(m -> (Map<String, Object>) m.get("price"))
+                                .map(p -> (String) p.get("text"))
+                                .map(t -> t.replaceAll("\\D", ""))
+                                .map(s -> s.isEmpty() ? "0" : s)
+                                .map(Integer::parseInt)
+                                .orElse(unitPrice * quantity);
+
+                        log.info(" item 파싱: name={}, unitPrice={}, quantity={}, totalPrice={}",
+                                name, unitPrice, quantity, price);
+
+                        itemDtos.add(ReceiptItemDto.builder()
+                                .itemName(name)
+                                .unitPrice(unitPrice)
+                                .quantity(quantity)
+                                .totalPrice(price)
+                                .build());
+
+                    } catch (Exception e) {
+                        log.warn(" 개별 항목 파싱 실패: {}", e.getMessage());
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.warn(" 항목 전체 파싱 실패: {}", e.getMessage());
+        }
+
         String filename = Paths.get(filePath).getFileName().toString();
-        dto.setImagePath(filename);
+        OcrResultDto dto = new OcrResultDto(shopName, date, totalPrice, filename);
+        dto.setItems(itemDtos);
         return dto;
     }
 }

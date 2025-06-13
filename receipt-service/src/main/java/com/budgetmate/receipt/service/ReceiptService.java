@@ -1,5 +1,7 @@
 package com.budgetmate.receipt.service;
 
+import com.budgetmate.receipt.entity.ReceiptItemEntity;
+import com.budgetmate.receipt.repository.ReceiptItemRepository;
 import jakarta.transaction.Transactional;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -15,10 +17,12 @@ import java.util.stream.Collectors;
 public class ReceiptService {
 
 	private final ReceiptRepository receiptRepository;
+	private final ReceiptItemRepository receiptItemRepository;
 
 	@Autowired
-	public ReceiptService(ReceiptRepository receiptRepository) {
+	public ReceiptService(ReceiptRepository receiptRepository, ReceiptItemRepository receiptItemRepository) {
 		this.receiptRepository = receiptRepository;
+		this.receiptItemRepository = receiptItemRepository;
 	}
 
 	public void createReceipt(ReceiptDto dto) {
@@ -33,6 +37,7 @@ public class ReceiptService {
 
 		receiptRepository.save(receipt);
 	}
+
 	public List<ReceiptDto> getReceiptsByUserId(Long userId) {
 		return receiptRepository.findByUserIdAndIsDeletedFalse(userId).stream()
 				.map(entity -> ReceiptDto.builder()
@@ -48,11 +53,46 @@ public class ReceiptService {
 	}
 
 	@Transactional
-	public void deleteReceipt(Long receiptId) {
-		ReceiptEntity receipt = receiptRepository.findById(receiptId)
-				.orElseThrow(() -> new IllegalArgumentException("해당 영수증이 없습니다."));
-		receipt.setIsDeleted(true); // ← 소프트 삭제
+	public void saveReceiptWithItems(ReceiptDto dto, List<ReceiptItemEntity> items) {
+		ReceiptEntity receipt = receiptRepository.save(ReceiptEntity.builder()
+				.shop(dto.getShop())
+				.imagePath(dto.getImagePath())
+				.userId(dto.getUserId())
+				.date(dto.getDate())
+				.keywordId(dto.getKeywordId())
+				.totalPrice(dto.getTotalPrice())
+				.build());
+
+		items.forEach(i -> i.setReceiptId(receipt.getReceiptId()));
+		receiptItemRepository.saveAll(items);
 	}
 
-}
+	@Transactional
+	public void markAsDeleted(Long id) {
+		ReceiptEntity receipt = receiptRepository.findById(id)
+				.orElseThrow(() -> new IllegalArgumentException("해당 영수증이 존재하지 않습니다."));
+		receipt.setIsDeleted(true);
 
+		List<ReceiptItemEntity> items = receiptItemRepository.findByReceiptId(id);
+		items.forEach(i -> i.setIsDeleted(true));
+		receiptItemRepository.saveAll(items);
+	}
+
+	@Transactional
+	public void unmarkAsDeleted(Long id) {
+		ReceiptEntity receipt = receiptRepository.findById(id)
+				.orElseThrow(() -> new IllegalArgumentException("해당 영수증이 존재하지 않습니다."));
+		receipt.setIsDeleted(false);
+
+		List<ReceiptItemEntity> items = receiptItemRepository.findByReceiptId(id);
+		items.forEach(i -> i.setIsDeleted(false));
+		receiptItemRepository.saveAll(items);
+	}
+
+	// 사용 안 한다면 완전히 삭제 가능
+	@Deprecated
+	@Transactional
+	public void deleteReceipt(Long receiptId) {
+		markAsDeleted(receiptId); // 내부적으로 soft delete 처리
+	}
+}
