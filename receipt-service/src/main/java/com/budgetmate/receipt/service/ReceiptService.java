@@ -95,4 +95,20 @@ public class ReceiptService {
 	public void deleteReceipt(Long receiptId) {
 		markAsDeleted(receiptId); // 내부적으로 soft delete 처리
 	}
+
+	public List<ReceiptDto> getReceiptsByUserIdAndMonth(Long userId, int year, int month) {
+		List<ReceiptEntity> entities = receiptRepository.findByUserIdAndMonth(userId, year, month);
+		return entities.stream()
+				.map(entity -> ReceiptDto.builder()
+						.receiptId(entity.getReceiptId())
+						.shop(entity.getShop())
+						.userId(entity.getUserId())
+						.imagePath(entity.getImagePath())
+						.date(entity.getDate())
+						.keywordId(entity.getKeywordId())
+						.totalPrice(entity.getTotalPrice())
+						.build())
+				.collect(Collectors.toList());
+	}
+
 }

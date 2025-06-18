@@ -23,6 +23,13 @@ spring:
           filters:
             - PreserveHostHeader
 
+        - id: budget-api
+          uri: lb://receipt-service
+          predicates:
+            - Path=/budget/**
+          filters:
+            - PreserveHostHeader
+
         - id: receipt-service
           uri: lb://receipt-service
           predicates:
@@ -57,16 +64,25 @@ spring:
             - Path=/receipt/image/**
           filters:
             - PreserveHostHeader
+
         - id: statis-service
           uri: lb://statis-service
           predicates:
             - Path=/statis/**
           filters:
             - PreserveHostHeader
+
         - id: history-service
           uri: lb://history-service
           predicates:
             - Path=/history/**
+          filters:
+            - PreserveHostHeader
+
+        - id: challenge-service
+          uri: lb://challenge-service
+          predicates:
+              - Path=/challenge/**
           filters:
             - PreserveHostHeader
 
@@ -78,9 +94,9 @@ spring:
         add-to-simple-url-handler-mapping: true
         corsConfigurations:
           '[/**]':
-            allowedOriginPatterns:
+            allowedOrigins:
               - http://localhost:5173
-              - http://172.20.10.*:5173  # 휴대폰
+              - http://172.20.10.5:5173  # ← 실제 모바일 IP 주소로 명시
             allowedMethods: "*"
             allowedHeaders: "*"
             allowCredentials: true

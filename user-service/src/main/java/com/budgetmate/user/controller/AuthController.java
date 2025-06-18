@@ -10,7 +10,9 @@ import com.budgetmate.user.service.UserService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
@@ -105,21 +107,30 @@ public class AuthController {
     }
 
     @PostMapping("/login")
-    public ResponseEntity<LoginResponse> login(@RequestBody LoginRequest request) {
+    public ResponseEntity<?> login(@RequestBody LoginRequest request) {
+        try {
+            User user = userService.authenticate(request.getEmail(), request.getPassword());
 
-        User user = userService.authenticate(request.getEmail(), request.getPassword());
-        if (user == null) {
-            return ResponseEntity.status(401).build();
+            String token = jwtTokenProvider.createToken(
+                    user.getId(),
+                    user.getEmail(),
+                    user.getRoles()
+            );
+
+            System.out.println("유저 컨트롤러 : 로그인 메서드 - 토큰 발급 / 유저 아이디 : " + user.getId());
+
+            return ResponseEntity.ok(new LoginResponse(user.getId(), token, user.getUserName()));
+
+        } catch (UsernameNotFoundException ex) {
+            return ResponseEntity.status(401).body(Map.of("message", ex.getMessage()));
+        } catch (BadCredentialsException ex) {
+            return ResponseEntity.status(401).body(Map.of("message", ex.getMessage()));
+        } catch (Exception ex) {
+            return ResponseEntity.status(500).body(Map.of("message", "서버 오류가 발생했습니다."));
         }
-
-        String token = jwtTokenProvider.createToken(
-                user.getId(),
-                user.getEmail(),
-                user.getRoles()
-        );
-        System.out.println("유저 컨트롤러 : 로그인 메서드 - 토큰 발급 / 유저 아이디 : " + user.getId());
-        return ResponseEntity.ok(new LoginResponse(user.getId(), token));
     }
+
+
 
     @PostMapping("/send-reset-code")
     public ResponseEntity<SendResetCodeResponse> sendResetCode(@RequestBody SendResetCodeRequest request) {
@@ -319,4 +330,30 @@ public class AuthController {
             return ResponseEntity.badRequest().build();
         }
     }
+
+    @PostMapping("/point/increase")
+    public ResponseEntity<Void> increasePoint(@RequestBody Map<String, Object> request) {
+        Long userId = Long.valueOf(request.get("userId").toString());
+        int point = Integer.parseInt(request.get("point").toString());
+        userService.addPoint(userId, point);
+        return ResponseEntity.ok().build();
+    }
+
+    @PutMapping("/update")
+    public ResponseEntity<?> updateProfile(@RequestBody Map<String, String> request) {
+        Long userId = Long.valueOf(request.get("userId"));
+        String userName = request.get("userName");
+        String currentPassword = request.get("currentPassword");
+        String newPassword = request.get("newPassword");
+
+        try {
+            userService.updateUserProfile(userId, userName, currentPassword, newPassword);
+            return ResponseEntity.ok(Map.of("message", "프로필이 수정되었습니다."));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
+        }
+    }
+
+
+
 }

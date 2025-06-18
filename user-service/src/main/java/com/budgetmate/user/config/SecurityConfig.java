@@ -40,8 +40,10 @@ public class SecurityConfig {
                         .requestMatchers(
                                 "/user/signup",
                                 "/user/login",
+                                "/user/update",
                                 "/user/oauth/kakao",
                                 "/user/oauth/google",
+                                "user/point/increase",
                                 "/user/confirm-social"
                         ).permitAll()
 

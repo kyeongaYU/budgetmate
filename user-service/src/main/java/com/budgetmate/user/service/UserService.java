@@ -12,6 +12,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -19,6 +21,7 @@ import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.Date;
 import java.util.List;
@@ -162,6 +165,19 @@ public class UserService {
             throw new RuntimeException("비밀번호가 일치하지 않습니다.");
         }
         return jwtTokenProvider.createToken(user.getId(), user.getEmail(), user.getRoles());
+    }
+
+    public LoginResponse loginAndGetResponse(LoginRequest request) {
+        User user = userRepository.findByEmail(request.getEmail())
+                .orElseThrow(() -> new RuntimeException("존재하지 않는 사용자입니다."));
+
+        if (!passwordEncoder.matches(request.getPassword(), user.getPassword())) {
+            throw new RuntimeException("비밀번호가 일치하지 않습니다.");
+        }
+
+        String token = jwtTokenProvider.createToken(user.getId(), user.getEmail(), user.getRoles());
+
+        return new LoginResponse(user.getId(), token, user.getUserName());
     }
 
     public boolean existsByEmail(String email) {
@@ -489,13 +505,45 @@ public class UserService {
     @Transactional
     public User authenticate(String email, String password) {
         User user = userRepository.findByEmail(email.trim().toLowerCase())
-                .orElse(null);
-        if (user != null && passwordEncoder.matches(password, user.getPassword())) {
-            System.out.println("비밀번호 일치");
-            return user;
+                .orElseThrow(() -> new UsernameNotFoundException("아이디가 올바르지 않습니다."));
+
+        if (!passwordEncoder.matches(password, user.getPassword())) {
+            throw new BadCredentialsException("비밀번호가 올바르지 않습니다.");
         }
-        System.out.println("비밀번호 불일치");
-        return null;
+
+        return user;
     }
+
+
+    @Transactional
+    public void addPoint(Long userId, int point) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new RuntimeException("해당 사용자를 찾을 수 없습니다."));
+
+        log.info("👀 현재 포인트: {}", user.getPoint());
+        user.setPoint(user.getPoint() + point);
+        log.info("💰 증가 후 포인트: {}", user.getPoint());
+
+        userRepository.save(user);
+    }
+
+
+
+    @Transactional
+    public void updateUserProfile(Long userId, String userName, String currentPassword, String newPassword) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new RuntimeException("해당 사용자를 찾을 수 없습니다."));
+
+        if (!passwordEncoder.matches(currentPassword, user.getPassword())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "현재 비밀번호가 일치하지 않습니다.");
+        }
+
+        user.setUserName(userName);
+        if (newPassword != null && !newPassword.isBlank()) {
+            user.setPassword(passwordEncoder.encode(newPassword));
+        }
+        userRepository.save(user);
+    }
+
 
 }

@@ -32,9 +32,15 @@ public class ReceiptController {
 	}
 
 	@GetMapping("/ledger")
-	public List<ReceiptDto> getLedger(@RequestParam("userId") Long userId) {
+	public List<ReceiptDto> getLedger(@RequestParam("userId") Long userId,
+									  @RequestParam(value = "month", required = false) Integer month,
+									  @RequestParam(value = "year", required = false) Integer year) {
+		if (month != null && year != null) {
+			return receiptService.getReceiptsByUserIdAndMonth(userId, year, month);
+		}
 		return receiptService.getReceiptsByUserId(userId);
 	}
+
 
 	@DeleteMapping("/{receiptId}")
 	public ResponseEntity<Void> deleteReceipt(@PathVariable Long receiptId) {

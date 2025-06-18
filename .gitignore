@@ -25,6 +25,7 @@ application-dev.yml
 application-dev.yaml
 application-lan.yml
 application-lan.yaml
+
 # 기본 설정 파일은 Git에 포함되도록 허용
 !application.yml
 !application.yaml

@@ -2,72 +2,73 @@ package com.budgetmate.service;
 
 import java.util.Map;
 
-import org.springframework.http.ResponseEntity;
-import org.springframework.stereotype.Service;
-import org.springframework.web.reactive.function.client.WebClient;
-
+import com.budgetmate.dto.CategoryRecommendationDto;
+import com.budgetmate.dto.MonthlyStatsDto;
 import com.budgetmate.query.StatisQuery;
-
-import reactor.core.publisher.Mono;
+import org.springframework.stereotype.Service;
 
 @Service
 public class StatisService {
-	
+
 	private final StatisQuery statisQuery;
-	
+
+
 	public StatisService(StatisQuery statisQuery) {
-		
 		this.statisQuery = statisQuery;
-		
 	}
-	
+
+	//  이번 주 총 소비
 	public Long getCurrentWeekService(Long userId) {
-	
-		
 		System.out.println("StatisService - getCurrentWeekService 실행 / 유저아이디 : " + userId);
 		return statisQuery.getCurrentWeek(userId);
-		
 	}
-	
-	public Map<String, Integer> calKeywordTotalPrice(Long userId) {
-		
-		System.out.println("statisService - calKeywordTotalPrice 실행 / 유저 아이디 : " + userId);
-		
-		Map<String, Integer> keywordTotal =  statisQuery.getKeywordTotalPrice(userId);
-		return keywordTotal;
-		
-	}
-	
-//	private final WebClient webClient;
-//	
-//	public StatisService(WebClient webClient) {
-//		
-//		this.webClient = webClient;
-//		
-//	}
-//	
-//	public Mono<ResponseEntity<Long>> getCurrentWeek(Long userId) {
-//		
-//		return 
-//				webClient.get()
-//					.uri("http://localhost:8082/reciept/getReciept")
-//					.retrieve()	// 요청을 보내고 응답을 받아오는 트리거
-//					//.bodyToMono(Long.class)	// 리턴 타입을 Mono<T>로 감쌈 (리액티브 객체)
-//					// .block(); 	// .block() 은 동기방식으로 받음. 안붙이면 비동기로 작동
-//					//.subscribe();   // 실제 실행을 트리거 하기만 함. 겨로가를 사용할 수는 없음. 리턴 타입은 void임.
-//					.toEntity(Long.class); // 응답 전체(상태코드, 헤더, 바디)를 가져옴.
-//		
-//	}
-	
-	
 
+    // 이번 주 카테고리별 통계
+	public Map<String, Integer> getCurrentWeekCategoryStats(Long userId) {
+		return statisQuery.getKeywordTotalPriceCurrentWeek(userId);
+	}
+	//  이번 달 총 지출
+	public int getCurrentMonthTotal(Long userId) {
+		System.out.println("StatisService - getCurrentMonthTotal 실행 / 유저 아이디 : " + userId);
+		return statisQuery.getMonthlyTotalCurrent(userId);
+	}
+
+	//  이번 달 카테고리별 통계
+	public Map<String, Integer> getCurrentMonthCategoryStats(Long userId) {
+		System.out.println("StatisService - getCurrentMonthCategoryStats 실행 / 유저 아이디 : " + userId);
+		return statisQuery.getKeywordTotalPriceCurrent(userId);
+	}
+
+
+	//  과소비 카테고리 추천
+	public CategoryRecommendationDto recommendCategory(Long userId) {
+		Map<String, Integer> map = statisQuery.getKeywordTotalPriceCurrent(userId);
+
+		if (map.isEmpty()) {
+			return new CategoryRecommendationDto("없음", "소비 내역이 없습니다.");
+		}
+
+		String overspent = map.entrySet().stream()
+				.max(Map.Entry.comparingByValue())
+				.get()
+				.getKey();
+
+		String reason = String.format(
+				"%s 카테고리에 지출이 많아요. 꼭 필요한 지출이 아니라면 줄여보는 건 어떨까요?",
+				overspent
+		);
+
+		return new CategoryRecommendationDto(overspent, reason);
+	}
+
+	//  연/월 기준 통합 통계
+	public MonthlyStatsDto getMonthlyStats(Long userId, int year, int month) {
+		System.out.println("StatisService - getMonthlyStats 실행 / userId: " + userId + " / " + year + "-" + month);
+
+		int totalSpending = statisQuery.getMonthlyTotal(userId, year, month);
+		Map<String, Integer> categoryStats = statisQuery.getKeywordTotalPrice(userId, year, month);
+		int budget = statisQuery.getMonthlyBudget(userId, year, month);
+
+		return new MonthlyStatsDto(totalSpending, categoryStats, budget);
+	}
 }
-
-//WebClient.get()
-//.uri("reciept/getReciept")
-//.retrieve()	// 요청을 보내고 응답을 받아오는 트리거
-//.bodyToMono(String.class)	// 리턴 타입을 Mono<T>로 감쌈 (리액티브 객체)
-////.block(); 	// .block() 은 동기방식으로 받음. 안붙이면 비동기로 작동
-//.subscribe();   // 실제 실행을 위한구독 처리
-//.bodyToMono() : http 응답 본문 body만 가져옴 : 리턴타입  Mono<Long>
-//.toEntity() : 응답 전체 (상태코드, 헤더, 바디)를 가져옴.    Mono<ResponseEntity<Long>>

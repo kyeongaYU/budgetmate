@@ -1,100 +1,123 @@
 package com.budgetmate.query;
 
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-
+import com.budgetmate.dto.UserDto;
+import lombok.RequiredArgsConstructor;
+import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.BeanPropertyRowMapper;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
-import com.budgetmate.dto.UserDto;
-
-import lombok.RequiredArgsConstructor;
-
+import java.sql.Date;
 import java.time.*;
 import java.time.temporal.*;
+import java.util.*;
 
 @Repository
 @RequiredArgsConstructor
 public class StatisQuery {
-	
+
 	private final JdbcTemplate jdbcTemplate;
-	LocalDate today = LocalDate.now();
-	LocalDate monday = today.with(DayOfWeek.MONDAY);
-	LocalDate now = LocalDate.now();
 
-
+	//  이번 주 총 소비
 	public Long getCurrentWeek(Long userId) {
 		LocalDate today = LocalDate.now();
 		LocalDate monday = today.with(DayOfWeek.MONDAY);
-		String sql = "SELECT SUM(total_price) FROM receipt WHERE user_id = ? AND keyword_id != ? AND `date` BETWEEN ? AND ?";
 
-		Long totalPrice = jdbcTemplate.queryForObject(sql, Long.class, userId, 8, java.sql.Date.valueOf(monday), java.sql.Date.valueOf(today)); // 챗 gpt가 monday를 java.sql...으로 감싸보라고 함.
-
-		System.out.println("🧾 userId: " + userId);
-		System.out.println("🗓️ monday: " + monday);
-		System.out.println("🗓️ today: " + today);
-		System.out.println("🔢 totalPrice: " + totalPrice);
-
+		String sql = "SELECT SUM(total_price) FROM receipt WHERE user_id = ? AND keyword_id != ? AND is_deleted = 0 AND `date` BETWEEN ? AND ?";
+		Long totalPrice = jdbcTemplate.queryForObject(sql, Long.class, userId, 8, Date.valueOf(monday), Date.valueOf(today));
 		return totalPrice != null ? totalPrice : 0L;
 	}
 
-	
-	
-	public Map<String, Integer> getKeywordTotalPrice(Long userId) {
-	    Map<String, Integer> keywordTotal = new HashMap<>();
-
-	    String[] keywordNames = {"food", "transportation", "living", "fashion", "health", "education", "investment"};
-	    String sql = "SELECT SUM(total_price) FROM receipt WHERE user_id = ? AND keyword_id = ? AND `date` BETWEEN ? AND ?";
-
-	    for (int i = 0; i < 7; i++) {
-	        Integer price = jdbcTemplate.queryForObject(sql, Integer.class, userId, i + 1, monday, now);
-	        keywordTotal.put(keywordNames[i], (price != null) ? price : 0);
-	    }
-		System.out.println("== getKeywordTotalPrice 실행 ===");
-		System.out.println("Living keyword total price: " + keywordTotal.get("living"));
-		System.out.println("transportation keyword total price: " + keywordTotal.get("living"));
-		System.out.println("food keyword total price : " + keywordTotal.get("food"));
-
-
-
-		return keywordTotal;
+	//이번 주 카테고리별 소비 금액
+	public Map<String, Integer> getKeywordTotalPriceCurrentWeek(Long userId) {
+		LocalDate today = LocalDate.now();
+		LocalDate monday = today.with(DayOfWeek.MONDAY);
+		return getCategoryStats(userId, monday, today);
 	}
-	
+
+	//  이번 달 소비 총합
+	public int getMonthlyTotalCurrent(Long userId) {
+		LocalDate now = LocalDate.now();
+		LocalDate start = now.withDayOfMonth(1);
+		LocalDate end = now.withDayOfMonth(now.lengthOfMonth());
+
+		String sql = "SELECT SUM(total_price) FROM receipt WHERE user_id = ? AND keyword_id != ? AND is_deleted = 0 AND `date` BETWEEN ? AND ?";
+		Integer total = jdbcTemplate.queryForObject(sql, Integer.class, userId, 8, Date.valueOf(start), Date.valueOf(end));
+		return total != null ? total : 0;
+	}
+
+	//  이번 달 카테고리별 통계
+	public Map<String, Integer> getKeywordTotalPriceCurrent(Long userId) {
+		LocalDate now = LocalDate.now();
+		LocalDate start = now.withDayOfMonth(1);
+		LocalDate end = now.withDayOfMonth(now.lengthOfMonth());
+		return getCategoryStats(userId, start, end);
+	}
+
+
+	//  연/월 기준 소비 총합
+	public int getMonthlyTotal(Long userId, int year, int month) {
+		LocalDate start = LocalDate.of(year, month, 1);
+		LocalDate end = start.withDayOfMonth(start.lengthOfMonth());
+
+		String sql = "SELECT SUM(total_price) FROM receipt WHERE user_id = ? AND keyword_id != ? AND is_deleted = 0 AND `date` BETWEEN ? AND ?";
+		Integer total = jdbcTemplate.queryForObject(sql, Integer.class, userId, 8, Date.valueOf(start), Date.valueOf(end));
+		return total != null ? total : 0;
+	}
+
+	//  연/월 기준 카테고리별 통계
+	public Map<String, Integer> getKeywordTotalPrice(Long userId, int year, int month) {
+		LocalDate start = LocalDate.of(year, month, 1);
+		LocalDate end = start.withDayOfMonth(start.lengthOfMonth());
+		return getCategoryStats(userId, start, end);
+	}
+
+	//  연/월 예산
+	public int getMonthlyBudget(Long userId, int year, int month) {
+		try {
+			String sql = "SELECT budget FROM monthly_budget WHERE user_id = ? AND year = ? AND month = ?";
+			return jdbcTemplate.queryForObject(sql, Integer.class, userId, year, month);
+		} catch (org.springframework.dao.EmptyResultDataAccessException e) {
+			return 0;
+		}
+	}
+
+	//  공통 카테고리 통계 계산기
+	private Map<String, Integer> getCategoryStats(Long userId, LocalDate start, LocalDate end) {
+		Map<String, Integer> result = new HashMap<>();
+		String[] categoryNames = { "외식", "교통비", "생활비", "쇼핑", "건강", "교육", "저축/투자" };
+		String sql = "SELECT SUM(total_price) FROM receipt WHERE user_id = ? AND keyword_id = ? AND is_deleted = 0 AND `date` BETWEEN ? AND ?";
+
+		for (int i = 0; i < categoryNames.length; i++) {
+			Integer sum = jdbcTemplate.queryForObject(sql, Integer.class, userId, i + 1, Date.valueOf(start), Date.valueOf(end));
+			result.put(categoryNames[i], sum != null ? sum : 0);
+		}
+
+		return result;
+	}
+
+	// 유저 전체 조회
 	public List<UserDto> getUserList() {
-		
-		System.out.println("3 : getUserList 실행 시작 - 유저 목록 반환");
-		String sql = "select * from user";
-		List<UserDto> users = jdbcTemplate.query(sql, new BeanPropertyRowMapper<>(UserDto.class));
-		return users;
-		
+		String sql = "SELECT * FROM user";
+		return jdbcTemplate.query(sql, new BeanPropertyRowMapper<>(UserDto.class));
 	}
-	
-	public void updateUser(int lastWeek, int point, Long id) {
-		
-		System.out.println("updateUser 실행 - 유저 포인트, lastWeek 업데이트 시작");
-		jdbcTemplate.update("update `user` set point = ?, last_week = ? where id = ?", point, lastWeek, id);
-		
+
+	// ✔ 포인트 및 주차 업데이트
+	public void updateUser(int lastWeek, int point, Long userId) {
+		jdbcTemplate.update("UPDATE user SET point = ?, last_week = ? WHERE id = ?", point, lastWeek, userId);
 	}
-	
-	public boolean searchBadgeHistory(Long id, Long badgeId) {
-		
-		System.out.println("searchBadgeHistory 실행 시작 - 유저의 뱃지 히스토리 내역을 찾기 시작");
+
+	//  뱃지 이력 확인
+	public boolean searchBadgeHistory(Long userId, Long badgeId) {
 		String sql = "SELECT 1 FROM history WHERE user_id = ? AND badge_id = ? LIMIT 1";
-		List<Map<String, Object>> result = jdbcTemplate.queryForList(sql, id, badgeId);
-		return !result.isEmpty();
+		return !jdbcTemplate.queryForList(sql, userId, badgeId).isEmpty();
 	}
-	
-	public void updateHistory(Long id, Long badgeId) {
-		
-		System.out.println("updateHistory - History 테이블 업데이트 시작");
 
-		String sql = "insert into history (badge_id, user_id, week_start_date, granted_date) values (?,?,?,?)";
-
-		jdbcTemplate.update(sql, badgeId, id, monday, today);
-
+	//  뱃지 이력 추가
+	public void updateHistory(Long userId, Long badgeId) {
+		LocalDate today = LocalDate.now();
+		LocalDate monday = today.with(DayOfWeek.MONDAY);
+		String sql = "INSERT INTO history (badge_id, user_id, week_start_date, granted_date) VALUES (?, ?, ?, ?)";
+		jdbcTemplate.update(sql, badgeId, userId, monday, today);
 	}
-	
-	
-	}
+}
