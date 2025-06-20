@@ -120,4 +120,6 @@ public class StatisQuery {
 		String sql = "INSERT INTO history (badge_id, user_id, week_start_date, granted_date) VALUES (?, ?, ?, ?)";
 		jdbcTemplate.update(sql, badgeId, userId, monday, today);
 	}
+
+
 }

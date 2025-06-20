@@ -29,7 +29,7 @@ public class WeeklySchedule {
 	}
 	
 	@Transactional
-	@Scheduled(cron = "0 42 16 ? * WED")
+	@Scheduled(cron = "0 58 11 ? * FRI")
 	public void WeeklyScheduleUpdate() { // CRON의 표현식 : 초 분 시 일 월 요일
 		
 
