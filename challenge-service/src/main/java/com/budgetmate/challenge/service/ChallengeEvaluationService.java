@@ -28,16 +28,22 @@ public class ChallengeEvaluationService {
 
     private final int REWARD_POINT = 2; // 챌린지 성공 시 지급 포인트
 
-    // 기존 평가 방식 (userId만 이용)
     @Transactional
     public void evaluateChallenge(ChallengeEntity challenge) {
+        if (challenge.isDeleted()) {
+            log.warn("⛔ 삭제된 챌린지(ID: {})는 평가 대상에서 제외됩니다.", challenge.getId());
+            return;
+        }
         Long userId = challenge.getUserId();
         evaluate(challenge, userId, null);
     }
 
-    // 헤더 기반 평가 방식 (JWT 토큰에서 userId 파싱)
     @Transactional
     public void evaluateChallenge(ChallengeEntity challenge, String authHeader) {
+        if (challenge.isDeleted()) {
+            log.warn("⛔ 삭제된 챌린지(ID: {})는 평가 대상에서 제외됩니다.", challenge.getId());
+            return;
+        }
         Long userId = tokenParser.getUserIdFromToken(authHeader);
         evaluate(challenge, userId, authHeader);
     }
@@ -95,4 +101,5 @@ public class ChallengeEvaluationService {
 
         challengeRepository.save(challenge);
     }
+
 }

@@ -37,7 +37,7 @@ public class ChallengeTestController {
             @RequestHeader("Authorization") String authHeader) {
 
         List<ChallengeEntity> expiredChallenges =
-                challengeRepository.findByEndDateBeforeAndEvaluatedFalse(LocalDate.now());
+                challengeRepository.findByEndDateBeforeAndEvaluatedFalseAndDeletedFalse(LocalDate.now());
 
         for (ChallengeEntity challenge : expiredChallenges) {
             evaluationService.evaluateChallenge(challenge, authHeader);
@@ -45,4 +45,5 @@ public class ChallengeTestController {
 
         return ResponseEntity.ok("만료 챌린지 모두 평가 완료");
     }
+
 }

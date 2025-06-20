@@ -14,5 +14,6 @@ public interface ChallengeRepository extends JpaRepository<ChallengeEntity, Long
     // 평가되지 않은 만료 챌린지 목록 (스케줄러 용)
     List<ChallengeEntity> findByEndDateBeforeAndEvaluatedFalse(LocalDate today);
 
-    List<ChallengeEntity> findByEndDateBeforeAndSuccessFalse(LocalDate today);
+    List<ChallengeEntity> findByEndDateBeforeAndEvaluatedFalseAndDeletedFalse(LocalDate today);
+
 }

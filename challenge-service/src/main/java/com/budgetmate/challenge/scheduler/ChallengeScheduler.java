@@ -29,7 +29,7 @@ public class ChallengeScheduler {
 
         //  아직 평가되지 않은 종료된 챌린지 조회
         List<ChallengeEntity> expiredChallenges =
-                challengeRepository.findByEndDateBeforeAndEvaluatedFalse(today);
+                challengeRepository.findByEndDateBeforeAndEvaluatedFalseAndDeletedFalse(today);
 
         log.info("📝 평가 대상 챌린지 수: {}", expiredChallenges.size());
 
