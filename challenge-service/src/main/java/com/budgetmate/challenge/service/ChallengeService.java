@@ -77,6 +77,7 @@ public class ChallengeService {
                 .startDate(entity.getStartDate())
                 .endDate(entity.getEndDate())
                 .success(entity.isSuccess())
+                .evaluated(entity.isEvaluated())
                 .build();
     }
 }

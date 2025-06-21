@@ -17,31 +17,24 @@ import java.util.List;
 public class ChallengeScheduler {
 
     private final ChallengeRepository challengeRepository;
-    private final ChallengeEvaluationService evaluationService;
+    private final ChallengeEvaluationService challengeEvaluationService;
 
-    /**
-     * 매일 새벽 3시에 평가되지 않은 챌린지를 찾아 자동 평가
-     */
-    @Scheduled(cron = "0 0 3 * * *") // 매일 3:00 AM
-    public void evaluateExpiredChallenges() {
-        LocalDate today = LocalDate.now();
-        log.info("🌙 [Scheduler] 챌린지 평가 시작 - 날짜: {}", today);
+    // 매일 새벽 2시에 만료된 챌린지 평가
+    @Scheduled(cron = "0 5 19 * * *")  // 매일 새벽 2시
+    public void evaluateAllExpiredChallenges() {
+        log.info("🔄 만료된 챌린지 평가 시작");
 
-        //  아직 평가되지 않은 종료된 챌린지 조회
-        List<ChallengeEntity> expiredChallenges =
-                challengeRepository.findByEndDateBeforeAndEvaluatedFalseAndDeletedFalse(today);
-
-        log.info("📝 평가 대상 챌린지 수: {}", expiredChallenges.size());
+        List<ChallengeEntity> expiredChallenges = challengeRepository.findAll().stream()
+                .filter(challenge -> !challenge.isEvaluated()
+                        && !challenge.isDeleted()
+                        && challenge.getEndDate().isBefore(LocalDate.now()))
+                .toList();
 
         for (ChallengeEntity challenge : expiredChallenges) {
-            try {
-                evaluationService.evaluateChallenge(challenge);
-                log.info("✅ 챌린지 평가 완료 - ID: {}", challenge.getId());
-            } catch (Exception e) {
-                log.error("❌ 챌린지 평가 실패 - ID: {}, 이유: {}", challenge.getId(), e.getMessage());
-            }
+            challengeEvaluationService.evaluateChallengeInternal(challenge);
         }
 
-        log.info("🛑 [Scheduler] 챌린지 평가 종료");
+        log.info("✅ 만료된 챌린지 평가 완료: {}건", expiredChallenges.size());
     }
+
 }
